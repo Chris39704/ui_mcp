@@ -91,5 +91,21 @@ def create_app(
         result = await active_service.refresh(request)
         return result.model_dump(mode="json")
 
+    @app.get("/refresh/status")
+    async def refresh_status(limit: int = 20) -> dict[str, object]:
+        status = active_service.refresh_status(limit=limit)
+        return status.model_dump(mode="json")
+
+    @app.get("/status/{library}/{component}")
+    async def component_status(
+        library: str,
+        component: str,
+        doc_type: str | None = None,
+    ) -> dict[str, object]:
+        status = await active_service.get_component_status(library, component, doc_type=doc_type)
+        if status is None:
+            raise HTTPException(status_code=404, detail={"message": "Component status not found"})
+        return status.model_dump(mode="json")
+
     app.mount("/mcp", mcp.streamable_http_app())
     return app

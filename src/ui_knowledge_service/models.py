@@ -25,6 +25,14 @@ class Citation(BaseModel):
     accessed_at: datetime = Field(default_factory=utcnow)
 
 
+class DocumentSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["summary", "usage", "api", "accessibility", "examples", "reference"]
+    title: str
+    content: str
+
+
 class SourceDescriptor(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -72,6 +80,9 @@ class ComponentDocument(BaseModel):
     title: str
     content_md: str
     code_examples: list[str] = Field(default_factory=list)
+    sections: list[DocumentSection] = Field(default_factory=list)
+    api_items: list[str] = Field(default_factory=list)
+    accessibility_notes: list[str] = Field(default_factory=list)
     source_url: str
     source_kind: str
     version: str | None = None
@@ -93,6 +104,16 @@ class ComponentDocument(BaseModel):
         if self.stale_after <= reference:
             return FreshnessState.stale
         return FreshnessState.fresh
+
+    def searchable_text(self) -> str:
+        parts = [self.title, self.content_md]
+        if self.api_items:
+            parts.append("API ITEMS\n" + "\n".join(self.api_items))
+        if self.accessibility_notes:
+            parts.append("ACCESSIBILITY\n" + "\n".join(self.accessibility_notes))
+        for section in self.sections:
+            parts.append(f"{section.kind.upper()} {section.title}\n{section.content}")
+        return "\n\n".join(part for part in parts if part.strip())
 
 
 class SearchHit(BaseModel):
@@ -156,6 +177,9 @@ class ComponentStatus(BaseModel):
     stale_after: datetime
     version: str | None = None
     citations: list[Citation] = Field(default_factory=list)
+    last_refresh_status: str | None = None
+    last_refresh_error: str | None = None
+    last_refresh_attempted_at: datetime | None = None
 
 
 class RefreshRequest(BaseModel):
@@ -173,6 +197,28 @@ class RefreshResult(BaseModel):
 
     refreshed_documents: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+
+
+class RefreshRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    library: str
+    component: str
+    doc_type: str
+    status: Literal["success", "not_modified", "failure"]
+    attempted_at: datetime = Field(default_factory=utcnow)
+    error: str | None = None
+
+
+class RefreshStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total_attempts: int = 0
+    success_count: int = 0
+    not_modified_count: int = 0
+    failure_count: int = 0
+    records: list[RefreshRecord] = Field(default_factory=list)
 
 
 class SourceSummary(BaseModel):

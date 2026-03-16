@@ -7,6 +7,7 @@ from collections import defaultdict
 from importlib import resources
 import json
 import logging
+from typing import Iterable
 
 from ui_knowledge_service.config import Settings
 from ui_knowledge_service.models import (
@@ -14,8 +15,10 @@ from ui_knowledge_service.models import (
     ComponentDocResponse,
     ComponentStatus,
     FreshnessState,
+    RefreshRecord,
     RefreshRequest,
     RefreshResult,
+    RefreshStatus,
     SearchHit,
     SearchResponse,
     SourceSummary,
@@ -113,23 +116,43 @@ class KnowledgeService:
         k: int = 6,
     ) -> SearchResponse:
         results: list[SearchHit] = []
+        preferred_doc_types = self._preferred_doc_types_for_query(query)
         if component_hint and library:
-            exact = self.store.get_document(library, component_hint)
-            if exact:
-                results.append(
-                    SearchHit(
-                        document_id=exact.document_id,
-                        library=exact.library,
-                        component=exact.component,
-                        doc_type=exact.doc_type,
-                        title=exact.title,
-                        source_url=exact.source_url,
-                        score=1.0,
-                        snippet=exact.content_md[:240].strip(),
-                        matched_by="exact",
-                        freshness_state=exact.freshness_state(),
+            for doc_type in preferred_doc_types:
+                exact = self.store.get_document(library, component_hint, doc_type)
+                if exact:
+                    results.append(
+                        SearchHit(
+                            document_id=exact.document_id,
+                            library=exact.library,
+                            component=exact.component,
+                            doc_type=exact.doc_type,
+                            title=exact.title,
+                            source_url=exact.source_url,
+                            score=1.0,
+                            snippet=exact.content_md[:240].strip(),
+                            matched_by="exact",
+                            freshness_state=exact.freshness_state(),
+                        )
                     )
-                )
+                    break
+            else:
+                exact = self.store.get_document(library, component_hint)
+                if exact:
+                    results.append(
+                        SearchHit(
+                            document_id=exact.document_id,
+                            library=exact.library,
+                            component=exact.component,
+                            doc_type=exact.doc_type,
+                            title=exact.title,
+                            source_url=exact.source_url,
+                            score=1.0,
+                            snippet=exact.content_md[:240].strip(),
+                            matched_by="exact",
+                            freshness_state=exact.freshness_state(),
+                        )
+                    )
 
         fts_hits = self.store.search_fts(query, library=library, limit=k)
         results.extend(fts_hits)
@@ -152,14 +175,14 @@ class KnowledgeService:
                 continue
             seen.add(hit.document_id)
             deduped.append(hit)
-            if len(deduped) >= k:
-                break
+        reranked = self._rerank_hits(deduped, query=query, preferred_doc_types=preferred_doc_types, component_hint=component_hint)
+        reranked = reranked[:k]
 
         return SearchResponse(
             query=query,
             library=library,
             component_hint=component_hint,
-            results=deduped,
+            results=reranked,
             retrieval_path=retrieval_path,
         )
 
@@ -178,6 +201,7 @@ class KnowledgeService:
         document = self.store.get_document(library, component, doc_type)
         if not document:
             return None
+        refresh_record = self.store.last_refresh_record(library, component, doc_type)
         return ComponentStatus(
             document_id=document.document_id,
             freshness_state=document.freshness_state(),
@@ -187,6 +211,20 @@ class KnowledgeService:
             stale_after=document.stale_after,
             version=document.version,
             citations=document.citations,
+            last_refresh_status=refresh_record.status if refresh_record else None,
+            last_refresh_error=refresh_record.error if refresh_record else None,
+            last_refresh_attempted_at=refresh_record.attempted_at if refresh_record else None,
+        )
+
+    def refresh_status(self, *, limit: int = 20) -> RefreshStatus:
+        counts = self.store.refresh_counts()
+        records = self.store.recent_refresh_records(limit=limit)
+        return RefreshStatus(
+            total_attempts=sum(counts.values()),
+            success_count=counts["success"],
+            not_modified_count=counts["not_modified"],
+            failure_count=counts["failure"],
+            records=records,
         )
 
     def source_summaries(self) -> list[SourceSummary]:
@@ -335,10 +373,13 @@ class KnowledgeService:
         return result
 
     def health(self) -> dict[str, object]:
+        refresh_status = self.refresh_status(limit=5)
         return {
             "status": "ok",
             "documents": self.store.count_documents(),
+            "stale_documents": self.store.stale_document_count(),
             "sources": [summary.model_dump(mode="json") for summary in self.source_summaries()],
+            "refresh": refresh_status.model_dump(mode="json"),
             "timestamp": utcnow().isoformat(),
         }
 
@@ -368,6 +409,16 @@ class KnowledgeService:
                 )
             except Exception as exc:
                 LOGGER.warning("Refresh failed for %s: %s", descriptor.document_id, exc)
+                self.store.record_refresh(
+                    RefreshRecord(
+                        document_id=descriptor.document_id,
+                        library=library,
+                        component=descriptor.component_slug,
+                        doc_type=descriptor.doc_type,
+                        status="failure",
+                        error=str(exc),
+                    )
+                )
                 return None
 
             if fetched.not_modified and existing:
@@ -381,6 +432,15 @@ class KnowledgeService:
                 )
                 saved = self.store.save_document(updated)
                 self.vector_index.upsert_document(saved)
+                self.store.record_refresh(
+                    RefreshRecord(
+                        document_id=saved.document_id,
+                        library=saved.library,
+                        component=saved.component,
+                        doc_type=saved.doc_type,
+                        status="not_modified",
+                    )
+                )
                 return saved
 
             raw_path = self.store.save_raw_snapshot(
@@ -392,6 +452,15 @@ class KnowledgeService:
             normalized = adapter.normalize(fetched, raw_path=raw_path)
             saved = self.store.save_document(normalized)
             self.vector_index.upsert_document(saved)
+            self.store.record_refresh(
+                RefreshRecord(
+                    document_id=saved.document_id,
+                    library=saved.library,
+                    component=saved.component,
+                    doc_type=saved.doc_type,
+                    status="success",
+                )
+            )
             return saved
 
     def _schedule_refresh(self, library: str, component: str, doc_type: str | None = None) -> None:
@@ -407,3 +476,48 @@ class KnowledgeService:
                 self._refresh_tasks.pop(task_key, None)
 
         self._refresh_tasks[task_key] = asyncio.create_task(runner())
+
+    def _preferred_doc_types_for_query(self, query: str) -> list[str]:
+        lowered = query.lower()
+        preferred: list[str] = []
+        if any(token in lowered for token in ("accessibility", "a11y", "aria", "screen reader", "keyboard")):
+            preferred.append("accessibility")
+        if any(token in lowered for token in ("api", "props", "prop", "slot", "slots", "argument", "attribute")):
+            preferred.append("api")
+        if any(token in lowered for token in ("example", "examples", "demo", "usage", "how do i", "how to")):
+            preferred.append("overview")
+            preferred.append("examples")
+        preferred.extend(["overview", "api", "accessibility", "examples"])
+        deduped: list[str] = []
+        for item in preferred:
+            if item not in deduped:
+                deduped.append(item)
+        return deduped
+
+    def _rerank_hits(
+        self,
+        hits: Iterable[SearchHit],
+        *,
+        query: str,
+        preferred_doc_types: list[str],
+        component_hint: str | None,
+    ) -> list[SearchHit]:
+        component_slug = slugify(component_hint) if component_hint else None
+        preference_scores = {doc_type: len(preferred_doc_types) - index for index, doc_type in enumerate(preferred_doc_types)}
+        reranked: list[SearchHit] = []
+        for hit in hits:
+            score = hit.score
+            if hit.matched_by == "exact":
+                score += 5.0
+            elif hit.matched_by == "fts":
+                score += 2.0
+            else:
+                score += 1.0
+            score += preference_scores.get(hit.doc_type, 0) * 0.35
+            if component_slug and hit.component == component_slug:
+                score += 1.5
+            if hit.freshness_state == FreshnessState.stale:
+                score -= 0.5
+            reranked.append(hit.model_copy(update={"score": score}))
+        reranked.sort(key=lambda item: item.score, reverse=True)
+        return reranked

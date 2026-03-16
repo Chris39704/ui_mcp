@@ -50,7 +50,7 @@ class VectorIndex:
 
     def upsert_document(self, document: ComponentDocument, *, persist: bool = True) -> None:
         self._chunks = [chunk for chunk in self._chunks if chunk.document_id != document.document_id]
-        chunks = chunk_text(document.content_md or document.title)
+        chunks = chunk_text(document.searchable_text() or document.title)
         if not chunks:
             chunks = [document.title]
         freshness = document.freshness_state().value

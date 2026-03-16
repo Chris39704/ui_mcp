@@ -7,7 +7,7 @@ import sqlite3
 from difflib import get_close_matches
 
 from ui_knowledge_service.config import Settings
-from ui_knowledge_service.models import ComponentDocument, SearchHit
+from ui_knowledge_service.models import ComponentDocument, RefreshRecord, SearchHit
 from ui_knowledge_service.utils import infer_extension, make_snippet, slugify, utcnow
 
 
@@ -35,6 +35,9 @@ class DocumentStore:
                 title TEXT NOT NULL,
                 content_md TEXT NOT NULL,
                 code_examples_json TEXT NOT NULL,
+                sections_json TEXT NOT NULL DEFAULT '[]',
+                api_items_json TEXT NOT NULL DEFAULT '[]',
+                accessibility_notes_json TEXT NOT NULL DEFAULT '[]',
                 source_url TEXT NOT NULL,
                 source_kind TEXT NOT NULL,
                 version TEXT,
@@ -48,8 +51,22 @@ class DocumentStore:
                 normalized_path TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS refresh_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id TEXT NOT NULL,
+                library TEXT NOT NULL,
+                component TEXT NOT NULL,
+                doc_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                attempted_at TEXT NOT NULL,
+                error TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_documents_library_component
                 ON documents (library, component, doc_type);
+
+            CREATE INDEX IF NOT EXISTS idx_refresh_records_document_id
+                ON refresh_records (document_id, attempted_at DESC);
 
             CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
                 doc_id UNINDEXED,
@@ -62,7 +79,16 @@ class DocumentStore:
             );
             """
         )
+        self._ensure_column("documents", "sections_json", "TEXT NOT NULL DEFAULT '[]'")
+        self._ensure_column("documents", "api_items_json", "TEXT NOT NULL DEFAULT '[]'")
+        self._ensure_column("documents", "accessibility_notes_json", "TEXT NOT NULL DEFAULT '[]'")
         self._conn.commit()
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        columns = {row["name"] for row in rows}
+        if column not in columns:
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def save_raw_snapshot(self, *, url: str, content_type: str | None, content: str, document_id: str) -> str:
         extension = infer_extension(url, content_type)
@@ -80,9 +106,10 @@ class DocumentStore:
             """
             INSERT INTO documents (
                 id, library, component, doc_type, title, content_md, code_examples_json,
+                sections_json, api_items_json, accessibility_notes_json,
                 source_url, source_kind, version, etag, last_modified, checksum,
                 fetched_at, stale_after, citations_json, raw_path, normalized_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 library = excluded.library,
                 component = excluded.component,
@@ -90,6 +117,9 @@ class DocumentStore:
                 title = excluded.title,
                 content_md = excluded.content_md,
                 code_examples_json = excluded.code_examples_json,
+                sections_json = excluded.sections_json,
+                api_items_json = excluded.api_items_json,
+                accessibility_notes_json = excluded.accessibility_notes_json,
                 source_url = excluded.source_url,
                 source_kind = excluded.source_kind,
                 version = excluded.version,
@@ -110,6 +140,9 @@ class DocumentStore:
                 updated.title,
                 updated.content_md,
                 json.dumps(updated.code_examples),
+                json.dumps([section.model_dump(mode="json") for section in updated.sections]),
+                json.dumps(updated.api_items),
+                json.dumps(updated.accessibility_notes),
                 updated.source_url,
                 updated.source_kind,
                 updated.version,
@@ -135,11 +168,80 @@ class DocumentStore:
                 slugify(updated.component),
                 updated.doc_type,
                 updated.title,
-                updated.content_md,
+                updated.searchable_text(),
             ),
         )
         self._conn.commit()
         return updated
+
+    def record_refresh(self, record: RefreshRecord) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO refresh_records (
+                document_id, library, component, doc_type, status, attempted_at, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.document_id,
+                record.library,
+                slugify(record.component),
+                record.doc_type,
+                record.status,
+                record.attempted_at.isoformat(),
+                record.error,
+            ),
+        )
+        self._conn.commit()
+
+    def last_refresh_record(self, library: str, component: str, doc_type: str | None = None) -> RefreshRecord | None:
+        component_slug = slugify(component)
+        params: tuple[object, ...]
+        sql = """
+            SELECT document_id, library, component, doc_type, status, attempted_at, error
+            FROM refresh_records
+            WHERE library = ? AND component = ?
+        """
+        params = (library, component_slug)
+        if doc_type:
+            sql += " AND doc_type = ?"
+            params += (doc_type,)
+        sql += " ORDER BY attempted_at DESC LIMIT 1"
+        row = self._conn.execute(sql, params).fetchone()
+        if not row:
+            return None
+        return RefreshRecord.model_validate(dict(row))
+
+    def recent_refresh_records(self, *, limit: int = 20) -> list[RefreshRecord]:
+        rows = self._conn.execute(
+            """
+            SELECT document_id, library, component, doc_type, status, attempted_at, error
+            FROM refresh_records
+            ORDER BY attempted_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [RefreshRecord.model_validate(dict(row)) for row in rows]
+
+    def refresh_counts(self) -> dict[str, int]:
+        rows = self._conn.execute(
+            """
+            SELECT status, COUNT(*) AS count
+            FROM refresh_records
+            GROUP BY status
+            """
+        ).fetchall()
+        counts = {"success": 0, "not_modified": 0, "failure": 0}
+        for row in rows:
+            counts[str(row["status"])] = int(row["count"])
+        return counts
+
+    def stale_document_count(self) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS count FROM documents WHERE stale_after <= ?",
+            (utcnow().isoformat(),),
+        ).fetchone()
+        return int(row["count"]) if row else 0
 
     def get_document(self, library: str, component: str, doc_type: str | None = None) -> ComponentDocument | None:
         component_slug = slugify(component)
@@ -259,6 +361,9 @@ class DocumentStore:
                 "title": row["title"],
                 "content_md": row["content_md"],
                 "code_examples": json.loads(row["code_examples_json"]),
+                "sections": json.loads(row["sections_json"]),
+                "api_items": json.loads(row["api_items_json"]),
+                "accessibility_notes": json.loads(row["accessibility_notes_json"]),
                 "source_url": row["source_url"],
                 "source_kind": row["source_kind"],
                 "version": row["version"],

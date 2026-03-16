@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from ui_knowledge_service.app import create_app
 from ui_knowledge_service.cli import _run_stdio_command
 from ui_knowledge_service.config import Settings
-from ui_knowledge_service.models import Citation, ComponentDocument, FetchedSource, SourceDescriptor
+from ui_knowledge_service.models import Citation, ComponentDocument, FetchedSource, RefreshRequest, SourceDescriptor
 from ui_knowledge_service.service import KnowledgeService
 from ui_knowledge_service.utils import sha256_text, utcnow
 
@@ -197,6 +197,33 @@ async def test_component_bundle_returns_multiple_doc_types(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_search_prefers_api_doc_type_for_api_queries(tmp_path):
+    service = build_service(
+        tmp_path,
+        adapter=FakeAdapter(
+            "mui",
+            "Overview content",
+            docs={
+                "overview": "Usage guidance for buttons",
+                "api": "variant prop disabled prop onClick callback API reference",
+            },
+        ),
+    )
+    await service.startup()
+    try:
+        await service.refresh(RefreshRequest(library="mui", component="button"))
+        response = await service.search_component_docs(
+            "button props variant",
+            library="mui",
+            component_hint="button",
+        )
+        assert response.results
+        assert response.results[0].doc_type == "api"
+    finally:
+        await service.shutdown()
+
+
+@pytest.mark.anyio
 async def test_miss_returns_clear_message_when_refresh_fails(tmp_path):
     service = build_service(tmp_path, adapter=FakeAdapter("mui", "unused", should_fail=True))
     await service.startup()
@@ -253,6 +280,8 @@ def test_admin_api_endpoints(tmp_path):
         sources = client.get("/sources")
         search = client.get("/search", params={"query": "overview content", "library": "mui"})
         bundle = client.get("/bundles/mui/button")
+        status = client.get("/status/mui/button")
+        refresh_status = client.get("/refresh/status")
 
     assert health.status_code == 200
     assert refresh.status_code == 200
@@ -260,10 +289,14 @@ def test_admin_api_endpoints(tmp_path):
     assert sources.status_code == 200
     assert search.status_code == 200
     assert bundle.status_code == 200
+    assert status.status_code == 200
+    assert refresh_status.status_code == 200
     assert document.json()["document"]["component"] == "button"
     assert len(refresh.json()["refreshed_documents"]) == 2
     assert search.json()["results"]
     assert len(bundle.json()["documents"]) == 2
+    assert status.json()["last_refresh_status"] in {"success", "not_modified"}
+    assert refresh_status.json()["total_attempts"] >= 2
 
 
 @pytest.mark.anyio

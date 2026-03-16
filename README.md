@@ -7,6 +7,7 @@ Offline-first UI documentation service for MUI, USWDS, and Angular Material.
 - Local artifact cache on disk plus a SQLite catalog with FTS search
 - Structured component retrieval first, vector-style fallback second
 - Catalog-driven official sources with multiple document types per component
+- Structured parsing for sections, API items, and accessibility notes
 - Stale-while-revalidate refresh behavior
 - Local FastAPI admin API
 - Mounted MCP tools for assistants
@@ -59,6 +60,8 @@ The service stores its working data under `.data/ui_knowledge_service` by defaul
 - `GET /search?query=button&library=mui`
 - `GET /documents/{library}/{component}`
 - `GET /bundles/{library}/{component}`
+- `GET /status/{library}/{component}`
+- `GET /refresh/status`
 - `POST /refresh`
 
 ## MCP tools
