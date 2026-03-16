@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from ui_knowledge_service.app import create_app
+from ui_knowledge_service.cli import _run_stdio_command
 from ui_knowledge_service.config import Settings
 from ui_knowledge_service.models import Citation, ComponentDocument, FetchedSource, SourceDescriptor
 from ui_knowledge_service.service import KnowledgeService
@@ -14,52 +16,67 @@ from ui_knowledge_service.utils import sha256_text, utcnow
 
 
 class FakeAdapter:
-    def __init__(self, library: str, content: str, *, should_fail: bool = False):
+    def __init__(self, library: str, content: str, *, should_fail: bool = False, docs: dict[str, str] | None = None):
         self.library = library
-        self.content = content
         self.should_fail = should_fail
-        self.descriptor = SourceDescriptor(
-            library=library,
-            component="button",
-            title="Fake Button",
-            url=f"https://example.com/{library}/button",
-            source_kind="docs_page",
-            freshness_days=1,
-        )
+        self.docs = docs or {"overview": content}
+        self.descriptors = {
+            doc_type: SourceDescriptor(
+                library=library,
+                component="button",
+                doc_type=doc_type,
+                title=f"Fake Button {doc_type.title()}",
+                url=f"https://example.com/{library}/button/{doc_type}",
+                source_kind="api_reference" if doc_type == "api" else "docs_page",
+                freshness_days=1,
+            )
+            for doc_type in self.docs
+        }
 
     def discover(self) -> list[SourceDescriptor]:
-        return [self.descriptor]
+        return list(self.descriptors.values())
+
+    def list_for_component(self, component: str) -> list[SourceDescriptor]:
+        if component not in {"button", "buttons"}:
+            return []
+        order = {"overview": 0, "api": 1, "accessibility": 2, "examples": 3}
+        return sorted(self.descriptors.values(), key=lambda item: (order.get(item.doc_type, 100), item.doc_type))
 
     def resolve(self, component: str, doc_type: str | None = None) -> SourceDescriptor | None:
-        if component in {"button", "buttons"}:
-            return self.descriptor
-        return None
+        if component not in {"button", "buttons"}:
+            return None
+        if doc_type:
+            return self.descriptors.get(doc_type)
+        descriptors = self.list_for_component(component)
+        return descriptors[0] if descriptors else None
 
     async def fetch(self, descriptor: SourceDescriptor, *, etag=None, last_modified=None) -> FetchedSource:
         if self.should_fail:
             raise RuntimeError("offline")
+        content = self.docs[descriptor.doc_type]
         return FetchedSource(
             descriptor=descriptor,
-            content=f"<main><h1>{descriptor.title}</h1><p>{self.content}</p><pre><code>button()</code></pre></main>",
+            content=f"<main><h1>{descriptor.title}</h1><p>{content}</p><pre><code>{descriptor.doc_type}_button()</code></pre></main>",
             content_type="text/html",
             etag="fake-etag",
             last_modified="Mon, 01 Jan 2024 00:00:00 GMT",
         )
 
     def normalize(self, fetched: FetchedSource, *, raw_path: str | None = None) -> ComponentDocument:
+        content = self.docs[fetched.descriptor.doc_type]
         return ComponentDocument(
             library=fetched.descriptor.library,
             component=fetched.descriptor.component,
             doc_type=fetched.descriptor.doc_type,
             title=fetched.descriptor.title,
-            content_md=self.content,
-            code_examples=["button()"],
+            content_md=content,
+            code_examples=[f"{fetched.descriptor.doc_type}_button()"],
             source_url=fetched.descriptor.url,
             source_kind=fetched.descriptor.source_kind,
             version="1.0.0",
             etag=fetched.etag,
             last_modified=fetched.last_modified,
-            checksum=sha256_text(self.content),
+            checksum=sha256_text(content),
             fetched_at=fetched.fetched_at,
             stale_after=fetched.fetched_at + timedelta(days=1),
             citations=[Citation(label=fetched.descriptor.title, url=fetched.descriptor.url)],
@@ -121,7 +138,7 @@ async def test_cache_miss_fetches_and_persists(tmp_path):
         assert response.document is not None
         assert response.retrieval_path == "source_fetch"
         assert stored is not None
-        assert stored.source_url == "https://example.com/mui/button"
+        assert stored.source_url == "https://example.com/mui/button/overview"
         assert stored.raw_path is not None
     finally:
         await service.shutdown()
@@ -158,6 +175,23 @@ async def test_stale_hit_returns_cached_and_refreshes_in_background(tmp_path):
         refreshed = service.store.get_document("mui", "button")
         assert refreshed is not None
         assert refreshed.content_md == "Fresh button content"
+    finally:
+        await service.shutdown()
+
+
+@pytest.mark.anyio
+async def test_component_bundle_returns_multiple_doc_types(tmp_path):
+    service = build_service(
+        tmp_path,
+        adapter=FakeAdapter("mui", "Primary action button", docs={"overview": "Overview content", "api": "API content"}),
+    )
+    await service.startup()
+    try:
+        response = await service.get_component_bundle("mui", "button")
+        assert len(response.documents) == 2
+        assert response.available_doc_types == ["overview", "api"]
+        assert {document.doc_type for document in response.documents} == {"overview", "api"}
+        assert response.retrieval_path == "source_fetch"
     finally:
         await service.shutdown()
 
@@ -206,7 +240,10 @@ async def test_search_uses_vector_fallback_when_fts_is_empty(tmp_path, monkeypat
 
 
 def test_admin_api_endpoints(tmp_path):
-    service = build_service(tmp_path)
+    service = build_service(
+        tmp_path,
+        adapter=FakeAdapter("mui", "Primary action button", docs={"overview": "Overview content", "api": "API content"}),
+    )
     app = create_app(service=service)
 
     with TestClient(app) as client:
@@ -214,17 +251,27 @@ def test_admin_api_endpoints(tmp_path):
         refresh = client.post("/refresh", json={"library": "mui", "component": "button"})
         document = client.get("/documents/mui/button")
         sources = client.get("/sources")
+        search = client.get("/search", params={"query": "overview content", "library": "mui"})
+        bundle = client.get("/bundles/mui/button")
 
     assert health.status_code == 200
     assert refresh.status_code == 200
     assert document.status_code == 200
     assert sources.status_code == 200
+    assert search.status_code == 200
+    assert bundle.status_code == 200
     assert document.json()["document"]["component"] == "button"
+    assert len(refresh.json()["refreshed_documents"]) == 2
+    assert search.json()["results"]
+    assert len(bundle.json()["documents"]) == 2
 
 
 @pytest.mark.anyio
 async def test_mcp_tool_roundtrip(tmp_path):
-    service = build_service(tmp_path)
+    service = build_service(
+        tmp_path,
+        adapter=FakeAdapter("mui", "Primary action button", docs={"overview": "Overview content", "api": "API content"}),
+    )
     await service.startup()
     try:
         from ui_knowledge_service.mcp_server import build_mcp_server
@@ -233,8 +280,42 @@ async def test_mcp_tool_roundtrip(tmp_path):
         tools = await mcp_server.list_tools()
         result = await mcp_server.call_tool("get_component_doc", {"library": "mui", "component": "button"})
         structured = result[1]
+        bundle_result = await mcp_server.call_tool("get_component_bundle", {"library": "mui", "component": "button"})
+        structured_bundle = bundle_result[1]
 
         assert any(tool.name == "get_component_doc" for tool in tools)
+        assert any(tool.name == "get_component_bundle" for tool in tools)
         assert structured["document"]["component"] == "button"
+        assert len(structured_bundle["documents"]) == 2
     finally:
         await service.shutdown()
+
+
+@pytest.mark.anyio
+async def test_stdio_runner_starts_and_stops_service(tmp_path):
+    service = SimpleNamespace(started=0, stopped=0)
+
+    async def startup():
+        service.started += 1
+
+    async def shutdown():
+        service.stopped += 1
+
+    service.startup = startup
+    service.shutdown = shutdown
+
+    class FakeMcpServer:
+        def __init__(self):
+            self.ran = False
+
+        async def run_stdio_async(self):
+            self.ran = True
+
+    fake_mcp = FakeMcpServer()
+    settings = Settings(data_dir=tmp_path / "data")
+
+    await _run_stdio_command(settings, service=service, mcp_factory=lambda _: fake_mcp)
+
+    assert service.started == 1
+    assert fake_mcp.ran is True
+    assert service.stopped == 1

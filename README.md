@@ -6,6 +6,7 @@ Offline-first UI documentation service for MUI, USWDS, and Angular Material.
 
 - Local artifact cache on disk plus a SQLite catalog with FTS search
 - Structured component retrieval first, vector-style fallback second
+- Catalog-driven official sources with multiple document types per component
 - Stale-while-revalidate refresh behavior
 - Local FastAPI admin API
 - Mounted MCP tools for assistants
@@ -17,6 +18,32 @@ uv sync --extra dev
 uv run ui-knowledge-service serve --host 127.0.0.1 --port 8000
 ```
 
+## MCP over stdio
+
+Run the MCP server directly over stdio:
+
+```bash
+uv run --no-sync ui-knowledge-service stdio
+```
+
+Or use the dedicated stdio entrypoint:
+
+```bash
+uv run --no-sync ui-knowledge-service-mcp
+```
+
+Example MCP client config:
+
+```json
+{
+  "command": "uv",
+  "args": ["run", "--directory", "/Users/chrisfarabaugh/Documents/workspace/ai_ui_skills", "--no-sync", "ui-knowledge-service-mcp"],
+  "env": {
+    "UIKS_DATA_DIR": "/Users/chrisfarabaugh/Documents/workspace/ai_ui_skills/.data/ui_knowledge_service"
+  }
+}
+```
+
 ## Prewarm the starter cache
 
 ```bash
@@ -25,3 +52,23 @@ uv run ui-knowledge-service prewarm
 
 The service stores its working data under `.data/ui_knowledge_service` by default.
 
+## HTTP endpoints
+
+- `GET /health`
+- `GET /sources`
+- `GET /search?query=button&library=mui`
+- `GET /documents/{library}/{component}`
+- `GET /bundles/{library}/{component}`
+- `POST /refresh`
+
+## MCP tools
+
+- `get_component_doc`
+- `get_component_bundle`
+- `search_component_docs`
+- `get_component_examples`
+- `get_component_status`
+
+## Local npm wrapper
+
+A local, publish-ready npm wrapper lives in [wrappers/npm](/Users/chrisfarabaugh/Documents/workspace/ai_ui_skills/wrappers/npm). For now it defaults to running the checked-out repo locally via `uv run --directory ... ui-knowledge-service-mcp`. When moved out of the repo for publishing, it falls back to `uvx --from ui-knowledge-service ui-knowledge-service-mcp`.

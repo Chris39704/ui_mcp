@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from importlib import resources
 import json
 import logging
-from pathlib import Path
 
 from ui_knowledge_service.config import Settings
 from ui_knowledge_service.models import (
+    ComponentBundleResponse,
     ComponentDocResponse,
     ComponentStatus,
     FreshnessState,
@@ -189,14 +190,85 @@ class KnowledgeService:
         )
 
     def source_summaries(self) -> list[SourceSummary]:
-        return [
-            SourceSummary(
-                library=library,
-                component_count=len(adapter.discover()),
-                components=sorted(descriptor.component_slug for descriptor in adapter.discover()),
+        summaries: list[SourceSummary] = []
+        for library, adapter in self.adapters.items():
+            descriptors = adapter.discover()
+            components = sorted({descriptor.component_slug for descriptor in descriptors})
+            summaries.append(
+                SourceSummary(
+                    library=library,
+                    component_count=len(components),
+                    components=components,
+                    doc_type_count=len(descriptors),
+                )
             )
-            for library, adapter in self.adapters.items()
-        ]
+        return summaries
+
+    async def get_component_bundle(
+        self,
+        library: str,
+        component: str,
+        *,
+        freshness: str = "prefer_cache",
+    ) -> ComponentBundleResponse:
+        adapter = self.adapters.get(library)
+        if not adapter:
+            return ComponentBundleResponse(
+                library=library,
+                component=slugify(component),
+                retrieval_path="miss",
+                message="Unknown library",
+            )
+
+        descriptors = adapter.list_for_component(component)
+        if not descriptors:
+            return ComponentBundleResponse(
+                library=library,
+                component=slugify(component),
+                retrieval_path="miss",
+                suggestions=self.store.suggest_components(library, component),
+                message="Component is not available in the source catalog.",
+            )
+
+        documents = []
+        refreshed_documents: list[str] = []
+        retrieval_segments: list[str] = []
+        for descriptor in descriptors:
+            response = await self.get_component_doc(
+                library=library,
+                component=component,
+                doc_type=descriptor.doc_type,
+                freshness=freshness,
+            )
+            retrieval_segments.append(response.retrieval_path)
+            if response.refreshed and response.document:
+                refreshed_documents.append(response.document.document_id)
+            if response.document:
+                documents.append(response.document)
+
+        if not documents:
+            return ComponentBundleResponse(
+                library=library,
+                component=slugify(component),
+                retrieval_path="+".join(sorted(set(retrieval_segments))) or "miss",
+                available_doc_types=[descriptor.doc_type for descriptor in descriptors],
+                suggestions=self.store.suggest_components(library, component),
+                message="No documents were available locally and refresh did not succeed.",
+            )
+
+        freshness_state = FreshnessState.fresh
+        if any(document.freshness_state() == FreshnessState.stale for document in documents):
+            freshness_state = FreshnessState.stale
+
+        return ComponentBundleResponse(
+            library=library,
+            component=slugify(component),
+            documents=documents,
+            available_doc_types=[descriptor.doc_type for descriptor in descriptors],
+            freshness_state=freshness_state,
+            retrieval_path="+".join(sorted(set(retrieval_segments))) or "cache_exact",
+            refreshed_documents=refreshed_documents,
+        )
 
     async def refresh(self, request: RefreshRequest) -> RefreshResult:
         result = RefreshResult()
@@ -210,31 +282,56 @@ class KnowledgeService:
             result.errors.append("library and component are required unless prewarm=true")
             return result
 
-        refreshed = await self._refresh_document(
-            request.library,
-            request.component,
-            request.doc_type,
-            force=request.force,
+        adapter = self.adapters.get(request.library)
+        if not adapter:
+            result.errors.append(f"Unknown library: {request.library}")
+            return result
+
+        descriptors = (
+            [adapter.resolve(request.component, request.doc_type)]
+            if request.doc_type
+            else adapter.list_for_component(request.component)
         )
-        if refreshed:
-            result.refreshed_documents.append(refreshed.document_id)
-        else:
-            result.errors.append(f"Unable to refresh {request.library}:{slugify(request.component)}")
+        descriptors = [descriptor for descriptor in descriptors if descriptor is not None]
+        if not descriptors:
+            result.errors.append(f"Unable to find catalog entries for {request.library}:{slugify(request.component)}")
+            return result
+
+        for descriptor in descriptors:
+            refreshed = await self._refresh_document(
+                request.library,
+                request.component,
+                descriptor.doc_type,
+                force=request.force,
+            )
+            if refreshed:
+                result.refreshed_documents.append(refreshed.document_id)
+            else:
+                result.errors.append(f"Unable to refresh {request.library}:{slugify(request.component)}:{descriptor.doc_type}")
         return result
 
     async def prewarm(self, *, force: bool = False) -> RefreshResult:
-        manifest_path = Path(__file__).with_name("prewarm_manifest.json")
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_resource = resources.files("ui_knowledge_service").joinpath("prewarm_manifest.json")
+        manifest = json.loads(manifest_resource.read_text(encoding="utf-8"))
         result = RefreshResult()
         for library, components in manifest.items():
             for component in components:
-                try:
-                    refreshed = await self._refresh_document(library, component, force=force)
-                    if refreshed:
-                        result.refreshed_documents.append(refreshed.document_id)
-                except Exception as exc:  # pragma: no cover - defensive logging path
-                    LOGGER.exception("Prewarm failed for %s:%s", library, component)
-                    result.errors.append(f"{library}:{component}: {exc}")
+                adapter = self.adapters.get(library)
+                if not adapter:
+                    continue
+                for descriptor in adapter.list_for_component(component):
+                    try:
+                        refreshed = await self._refresh_document(
+                            library,
+                            component,
+                            doc_type=descriptor.doc_type,
+                            force=force,
+                        )
+                        if refreshed:
+                            result.refreshed_documents.append(refreshed.document_id)
+                    except Exception as exc:  # pragma: no cover - defensive logging path
+                        LOGGER.exception("Prewarm failed for %s:%s:%s", library, component, descriptor.doc_type)
+                        result.errors.append(f"{library}:{component}:{descriptor.doc_type}: {exc}")
         return result
 
     def health(self) -> dict[str, object]:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from abc import ABC
 from datetime import timedelta
+from importlib import resources
+import json
 import logging
 import re
 
@@ -26,21 +28,33 @@ class BaseSourceAdapter(ABC):
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._descriptors = {descriptor.component_slug: descriptor for descriptor in self._build_catalog()}
+        self._descriptors_by_id = {
+            descriptor.document_id: descriptor for descriptor in self._build_catalog()
+        }
 
     def discover(self) -> list[SourceDescriptor]:
-        return list(self._descriptors.values())
+        return list(self._descriptors_by_id.values())
+
+    def list_for_component(self, component: str) -> list[SourceDescriptor]:
+        component_slug = slugify(component)
+        matches: list[SourceDescriptor] = []
+        for descriptor in self._descriptors_by_id.values():
+            if descriptor.component_slug == component_slug:
+                matches.append(descriptor)
+                continue
+            aliases = {slugify(alias) for alias in descriptor.aliases}
+            if component_slug in aliases:
+                matches.append(descriptor)
+        return sorted(matches, key=lambda item: (self._doc_type_rank(item.doc_type), item.doc_type, item.title))
 
     def resolve(self, component: str, doc_type: str | None = None) -> SourceDescriptor | None:
-        component_slug = slugify(component)
-        descriptor = self._descriptors.get(component_slug)
-        if descriptor and (doc_type is None or descriptor.doc_type == doc_type):
-            return descriptor
-        for candidate in self._descriptors.values():
-            aliases = {slugify(alias) for alias in candidate.aliases}
-            if component_slug in aliases and (doc_type is None or candidate.doc_type == doc_type):
-                return candidate
-        return None
+        candidates = self.list_for_component(component)
+        if doc_type:
+            for candidate in candidates:
+                if candidate.doc_type == doc_type:
+                    return candidate
+            return None
+        return candidates[0] if candidates else None
 
     async def fetch(
         self,
@@ -107,6 +121,11 @@ class BaseSourceAdapter(ABC):
     def _build_catalog(self) -> list[SourceDescriptor]:
         raise NotImplementedError
 
+    def _load_catalog(self, filename: str) -> list[SourceDescriptor]:
+        resource = resources.files("ui_knowledge_service.sources.catalogs").joinpath(filename)
+        entries = json.loads(resource.read_text(encoding="utf-8"))
+        return [SourceDescriptor.model_validate({"library": self.library, **entry}) for entry in entries]
+
     def _extract_document_parts(self, fetched: FetchedSource) -> tuple[str, str, list[str]]:
         content_type = fetched.content_type.lower()
         if "html" in content_type or fetched.descriptor.url.startswith("http"):
@@ -128,17 +147,31 @@ class BaseSourceAdapter(ABC):
         for selector in ("script", "style", "nav", "footer", "header", "aside", "noscript", "svg"):
             for node in soup.select(selector):
                 node.decompose()
-        main = soup.find("main") or soup.find("article") or soup.body or soup
+        for selector in fetched.descriptor.exclude_selectors:
+            for node in soup.select(selector):
+                node.decompose()
+
+        if fetched.descriptor.content_selector:
+            main = soup.select_one(fetched.descriptor.content_selector)
+        else:
+            main = soup.find("main") or soup.find("article") or soup.body or soup
+        if main is None:
+            main = soup.body or soup
         title = fetched.descriptor.title
-        heading = main.find(["h1", "title"])
+        if fetched.descriptor.heading_selector:
+            heading = main.select_one(fetched.descriptor.heading_selector) or soup.select_one(
+                fetched.descriptor.heading_selector
+            )
+        else:
+            heading = main.find(["h1", "title"])
         if heading:
             title = heading.get_text(" ", strip=True) or title
-        code_blocks = [
-            code.get_text("\n", strip=True)
-            for code in main.select("pre code, pre")
-            if code.get_text(" ", strip=True)
-        ]
+        code_selector = fetched.descriptor.code_selector or "pre code, pre"
+        code_blocks = [code.get_text("\n", strip=True) for code in main.select(code_selector) if code.get_text(" ", strip=True)]
         markdown = html_to_markdown(str(main), heading_style="ATX", bullets="-")
         markdown = re.sub(r"\n{3,}", "\n\n", markdown).strip()
         return title, markdown, unique_strings(code_blocks[:8])
 
+    def _doc_type_rank(self, doc_type: str) -> int:
+        order = {"overview": 0, "api": 1, "accessibility": 2, "examples": 3}
+        return order.get(doc_type, 100)

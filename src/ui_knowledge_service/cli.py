@@ -9,6 +9,7 @@ import uvicorn
 
 from ui_knowledge_service.app import create_app
 from ui_knowledge_service.config import Settings
+from ui_knowledge_service.mcp_server import build_mcp_server
 from ui_knowledge_service.models import RefreshRequest
 from ui_knowledge_service.service import KnowledgeService
 
@@ -21,6 +22,7 @@ def main() -> None:
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8000)
 
+    subparsers.add_parser("stdio", help="Run the MCP server over stdio")
     subparsers.add_parser("prewarm", help="Populate the starter offline cache")
 
     refresh_parser = subparsers.add_parser("refresh", help="Refresh one component")
@@ -35,8 +37,18 @@ def main() -> None:
     if args.command == "serve":
         uvicorn.run(create_app(settings), host=args.host, port=args.port)
         return
+    if args.command == "stdio":
+        asyncio.run(_run_stdio_command(settings))
+        return
 
     asyncio.run(_run_async_command(args, settings))
+
+
+def main_stdio() -> None:
+    """Console script entrypoint that runs the MCP server over stdio."""
+
+    settings = Settings.from_env()
+    asyncio.run(_run_stdio_command(settings))
 
 
 async def _run_async_command(args: argparse.Namespace, settings: Settings) -> None:
@@ -58,3 +70,18 @@ async def _run_async_command(args: argparse.Namespace, settings: Settings) -> No
             print(result.model_dump_json(indent=2))
     finally:
         await service.shutdown()
+
+
+async def _run_stdio_command(
+    settings: Settings,
+    *,
+    service: KnowledgeService | None = None,
+    mcp_factory=build_mcp_server,
+) -> None:
+    active_service = service or KnowledgeService(settings)
+    await active_service.startup()
+    try:
+        mcp_server = mcp_factory(active_service)
+        await mcp_server.run_stdio_async()
+    finally:
+        await active_service.shutdown()

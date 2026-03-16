@@ -1,0 +1,84 @@
+[
+  {
+    "component": "button",
+    "doc_type": "overview",
+    "title": "Angular Material Button Overview",
+    "url": "https://material.angular.dev/components/button/overview",
+    "source_kind": "docs_page",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "button",
+    "doc_type": "api",
+    "title": "Angular Material Button API",
+    "url": "https://material.angular.dev/components/button/api",
+    "source_kind": "api_reference",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "input",
+    "doc_type": "overview",
+    "title": "Angular Material Input Overview",
+    "url": "https://material.angular.dev/components/input/overview",
+    "source_kind": "docs_page",
+    "aliases": ["text-field", "textfield"],
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "input",
+    "doc_type": "api",
+    "title": "Angular Material Input API",
+    "url": "https://material.angular.dev/components/input/api",
+    "source_kind": "api_reference",
+    "aliases": ["text-field", "textfield"],
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "dialog",
+    "doc_type": "overview",
+    "title": "Angular Material Dialog Overview",
+    "url": "https://material.angular.dev/components/dialog/overview",
+    "source_kind": "docs_page",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "dialog",
+    "doc_type": "api",
+    "title": "Angular Material Dialog API",
+    "url": "https://material.angular.dev/components/dialog/api",
+    "source_kind": "api_reference",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "table",
+    "doc_type": "overview",
+    "title": "Angular Material Table Overview",
+    "url": "https://material.angular.dev/components/table/overview",
+    "source_kind": "docs_page",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "table",
+    "doc_type": "api",
+    "title": "Angular Material Table API",
+    "url": "https://material.angular.dev/components/table/api",
+    "source_kind": "api_reference",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  }
+]

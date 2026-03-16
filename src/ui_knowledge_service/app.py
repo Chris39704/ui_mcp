@@ -39,6 +39,21 @@ def create_app(
     async def sources() -> list[dict[str, object]]:
         return [summary.model_dump(mode="json") for summary in active_service.source_summaries()]
 
+    @app.get("/search")
+    async def search(
+        query: str,
+        library: str | None = None,
+        component_hint: str | None = None,
+        k: int = 6,
+    ) -> dict[str, object]:
+        response = await active_service.search_component_docs(
+            query=query,
+            library=library,
+            component_hint=component_hint,
+            k=k,
+        )
+        return response.model_dump(mode="json")
+
     @app.get("/documents/{library}/{component}")
     async def get_document(
         library: str,
@@ -53,6 +68,21 @@ def create_app(
             freshness=freshness,
         )
         if response.document is None:
+            raise HTTPException(status_code=404, detail=response.model_dump(mode="json"))
+        return response.model_dump(mode="json")
+
+    @app.get("/bundles/{library}/{component}")
+    async def get_bundle(
+        library: str,
+        component: str,
+        freshness: str = "prefer_cache",
+    ) -> dict[str, object]:
+        response = await active_service.get_component_bundle(
+            library=library,
+            component=component,
+            freshness=freshness,
+        )
+        if not response.documents:
             raise HTTPException(status_code=404, detail=response.model_dump(mode="json"))
         return response.model_dump(mode="json")
 

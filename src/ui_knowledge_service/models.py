@@ -36,6 +36,10 @@ class SourceDescriptor(BaseModel):
     source_kind: str = "docs_page"
     aliases: tuple[str, ...] = ()
     freshness_days: int = 7
+    content_selector: str | None = None
+    heading_selector: str | None = None
+    code_selector: str | None = None
+    exclude_selectors: tuple[str, ...] = ()
 
     @property
     def component_slug(self) -> str:
@@ -117,6 +121,20 @@ class ComponentDocResponse(BaseModel):
     message: str | None = None
 
 
+class ComponentBundleResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    library: str
+    component: str
+    documents: list[ComponentDocument] = Field(default_factory=list)
+    available_doc_types: list[str] = Field(default_factory=list)
+    freshness_state: FreshnessState = FreshnessState.missing
+    retrieval_path: str
+    refreshed_documents: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+    message: str | None = None
+
+
 class SearchResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -163,6 +181,7 @@ class SourceSummary(BaseModel):
     library: str
     component_count: int
     components: list[str]
+    doc_type_count: int = 0
 
 
 def default_stale_after(days: int) -> datetime:

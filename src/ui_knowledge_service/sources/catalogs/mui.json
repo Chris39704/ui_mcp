@@ -1,0 +1,86 @@
+[
+  {
+    "component": "button",
+    "doc_type": "overview",
+    "title": "MUI Button Overview",
+    "url": "https://mui.com/material-ui/react-button/",
+    "source_kind": "docs_page",
+    "aliases": ["buttons"],
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "button",
+    "doc_type": "api",
+    "title": "MUI Button API",
+    "url": "https://mui.com/material-ui/api/button/",
+    "source_kind": "api_reference",
+    "aliases": ["buttons"],
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "text-field",
+    "doc_type": "overview",
+    "title": "MUI Text Field Overview",
+    "url": "https://mui.com/material-ui/react-text-field/",
+    "source_kind": "docs_page",
+    "aliases": ["textfield", "input"],
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "text-field",
+    "doc_type": "api",
+    "title": "MUI Text Field API",
+    "url": "https://mui.com/material-ui/api/text-field/",
+    "source_kind": "api_reference",
+    "aliases": ["textfield", "input"],
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "dialog",
+    "doc_type": "overview",
+    "title": "MUI Dialog Overview",
+    "url": "https://mui.com/material-ui/react-dialog/",
+    "source_kind": "docs_page",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "dialog",
+    "doc_type": "api",
+    "title": "MUI Dialog API",
+    "url": "https://mui.com/material-ui/api/dialog/",
+    "source_kind": "api_reference",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "table",
+    "doc_type": "overview",
+    "title": "MUI Table Overview",
+    "url": "https://mui.com/material-ui/react-table/",
+    "source_kind": "docs_page",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "table",
+    "doc_type": "api",
+    "title": "MUI Table API",
+    "url": "https://mui.com/material-ui/api/table/",
+    "source_kind": "api_reference",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  }
+]

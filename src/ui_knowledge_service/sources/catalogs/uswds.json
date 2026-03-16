@@ -1,0 +1,84 @@
+[
+  {
+    "component": "button",
+    "doc_type": "overview",
+    "title": "USWDS Button Overview",
+    "url": "https://designsystem.digital.gov/components/button/",
+    "source_kind": "docs_page",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "button",
+    "doc_type": "accessibility",
+    "title": "USWDS Button Accessibility",
+    "url": "https://designsystem.digital.gov/components/button/",
+    "source_kind": "accessibility_reference",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "form",
+    "doc_type": "overview",
+    "title": "USWDS Form Overview",
+    "url": "https://designsystem.digital.gov/components/form/",
+    "source_kind": "docs_page",
+    "aliases": ["forms"],
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "form",
+    "doc_type": "accessibility",
+    "title": "USWDS Form Accessibility",
+    "url": "https://designsystem.digital.gov/components/form/",
+    "source_kind": "accessibility_reference",
+    "aliases": ["forms"],
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "table",
+    "doc_type": "overview",
+    "title": "USWDS Table Overview",
+    "url": "https://designsystem.digital.gov/components/table/",
+    "source_kind": "docs_page",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "table",
+    "doc_type": "accessibility",
+    "title": "USWDS Table Accessibility",
+    "url": "https://designsystem.digital.gov/components/table/",
+    "source_kind": "accessibility_reference",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "header",
+    "doc_type": "overview",
+    "title": "USWDS Header Overview",
+    "url": "https://designsystem.digital.gov/components/header/",
+    "source_kind": "docs_page",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "header",
+    "doc_type": "accessibility",
+    "title": "USWDS Header Accessibility",
+    "url": "https://designsystem.digital.gov/components/header/",
+    "source_kind": "accessibility_reference",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  }
+]

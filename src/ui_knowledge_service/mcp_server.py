@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from ui_knowledge_service.models import ComponentDocResponse, ComponentStatus, SearchResponse
+from ui_knowledge_service.models import ComponentBundleResponse, ComponentDocResponse, ComponentStatus, SearchResponse
 from ui_knowledge_service.service import KnowledgeService
 
 
@@ -24,6 +24,20 @@ def build_mcp_server(service: KnowledgeService) -> FastMCP:
             library=library,
             component=component,
             doc_type=doc_type,
+            freshness=freshness,
+        )
+
+    @mcp.tool()
+    async def get_component_bundle(
+        library: str,
+        component: str,
+        freshness: str = "prefer_cache",
+    ) -> ComponentBundleResponse:
+        """Retrieve all available document types for a component from local cache and official sources."""
+
+        return await service.get_component_bundle(
+            library=library,
+            component=component,
             freshness=freshness,
         )
 
@@ -60,4 +74,3 @@ def build_mcp_server(service: KnowledgeService) -> FastMCP:
         return await service.get_component_status(library, component, doc_type=doc_type)
 
     return mcp
-

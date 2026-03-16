@@ -3,4 +3,6 @@
 __pycache__/
 *.pyc
 .data/
-
+.uv-cache/
+dist/
+node_modules/

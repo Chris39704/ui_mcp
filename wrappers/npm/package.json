@@ -1,0 +1,15 @@
+{
+  "name": "@codex-local/ui-knowledge-service-mcp",
+  "version": "0.1.0",
+  "description": "Local wrapper for launching the UI Knowledge Service MCP server.",
+  "private": true,
+  "bin": {
+    "ui-knowledge-service-mcp": "bin/ui-knowledge-service-mcp.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}
