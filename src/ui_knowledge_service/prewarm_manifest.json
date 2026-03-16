@@ -1,0 +1,5 @@
+{
+  "mui": ["button", "text-field", "dialog", "table"],
+  "angular-material": ["button", "input", "dialog", "table"],
+  "uswds": ["button", "form", "table", "header"]
+}
