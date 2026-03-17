@@ -166,6 +166,36 @@ class SearchResponse(BaseModel):
     retrieval_path: str = "fts"
 
 
+class ResolvedSupportingDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    library: str
+    component: str
+    doc_type: str
+    title: str
+    source_url: str
+    freshness_state: FreshnessState
+
+
+class ResolvedComponentAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
+    library: str | None = None
+    component: str | None = None
+    summary: str = ""
+    key_points: list[str] = Field(default_factory=list)
+    api_highlights: list[str] = Field(default_factory=list)
+    accessibility_highlights: list[str] = Field(default_factory=list)
+    example_snippets: list[str] = Field(default_factory=list)
+    supporting_documents: list[ResolvedSupportingDocument] = Field(default_factory=list)
+    freshness_state: FreshnessState = FreshnessState.missing
+    retrieval_path: str = "miss"
+    suggestions: list[str] = Field(default_factory=list)
+    message: str | None = None
+
+
 class ComponentStatus(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -228,6 +258,113 @@ class SourceSummary(BaseModel):
     component_count: int
     components: list[str]
     doc_type_count: int = 0
+
+
+class SourceAuditEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    library: str
+    component: str
+    doc_type: str
+    url: str
+    fetch_status: Literal["success", "failure"]
+    content_length: int = 0
+    content_checksum: str | None = None
+    section_count: int = 0
+    api_item_count: int = 0
+    accessibility_note_count: int = 0
+    example_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    error: str | None = None
+    snapshot_path: str | None = None
+
+
+class SourceAuditReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    generated_at: datetime = Field(default_factory=utcnow)
+    entries: list[SourceAuditEntry] = Field(default_factory=list)
+
+
+class SourceAuditDriftEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    library: str
+    component: str
+    doc_type: str
+    status: Literal["unchanged", "changed", "new", "missing", "regressed", "recovered"]
+    changes: list[str] = Field(default_factory=list)
+    current: SourceAuditEntry | None = None
+    baseline: SourceAuditEntry | None = None
+
+
+class SourceAuditComparisonReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    generated_at: datetime = Field(default_factory=utcnow)
+    baseline_generated_at: datetime | None = None
+    current_generated_at: datetime | None = None
+    changed_count: int = 0
+    unchanged_count: int = 0
+    new_count: int = 0
+    missing_count: int = 0
+    regressed_count: int = 0
+    recovered_count: int = 0
+    entries: list[SourceAuditDriftEntry] = Field(default_factory=list)
+
+
+class AuditSeverity(str, Enum):
+    info = "info"
+    warn = "warn"
+    error = "error"
+
+
+class SourceAuditMaintenanceRecommendation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    library: str
+    component: str
+    doc_type: str
+    severity: AuditSeverity
+    category: Literal["fetch_failure", "warning", "drift", "baseline"]
+    summary: str
+    reasons: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+    source_url: str | None = None
+    drift_status: Literal["unchanged", "changed", "new", "missing", "regressed", "recovered"] | None = None
+
+
+class SourceAuditMaintenanceReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    generated_at: datetime = Field(default_factory=utcnow)
+    baseline_path: str | None = None
+    baseline_available: bool = False
+    comparison_available: bool = False
+    documents_scanned: int = 0
+    recommendation_count: int = 0
+    error_count: int = 0
+    warn_count: int = 0
+    info_count: int = 0
+    recommendations: list[SourceAuditMaintenanceRecommendation] = Field(default_factory=list)
+
+
+class BaselinePromotionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    promoted: bool = False
+    forced: bool = False
+    baseline_path: str
+    report_json_path: str | None = None
+    report_markdown_path: str | None = None
+    blocking_severity: AuditSeverity | None = None
+    blocking_recommendation_count: int = 0
+    blocking_recommendations: list[SourceAuditMaintenanceRecommendation] = Field(default_factory=list)
+    maintenance_report: SourceAuditMaintenanceReport
+    message: str | None = None
 
 
 def default_stale_after(days: int) -> datetime:

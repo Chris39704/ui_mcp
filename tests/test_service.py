@@ -8,11 +8,23 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ui_knowledge_service.app import create_app
-from ui_knowledge_service.cli import _run_stdio_command
+from ui_knowledge_service.cli import _run_stdio_command, has_recommendations_at_or_above
 from ui_knowledge_service.config import Settings
-from ui_knowledge_service.models import Citation, ComponentDocument, FetchedSource, RefreshRequest, SourceDescriptor
+from ui_knowledge_service.models import (
+    AuditSeverity,
+    Citation,
+    ComponentDocument,
+    DocumentSection,
+    FetchedSource,
+    RefreshRequest,
+    SourceDescriptor,
+)
 from ui_knowledge_service.service import KnowledgeService
 from ui_knowledge_service.utils import sha256_text, utcnow
+
+
+def long_text(seed: str) -> str:
+    return " ".join([seed] * 18)
 
 
 class FakeAdapter:
@@ -64,6 +76,18 @@ class FakeAdapter:
 
     def normalize(self, fetched: FetchedSource, *, raw_path: str | None = None) -> ComponentDocument:
         content = self.docs[fetched.descriptor.doc_type]
+        if fetched.descriptor.doc_type == "api":
+            sections = [DocumentSection(kind="api", title="Props", content=content)]
+            api_items = ["variant", "disabled", "onClick"]
+            accessibility_notes: list[str] = []
+        elif fetched.descriptor.doc_type == "accessibility":
+            sections = [DocumentSection(kind="accessibility", title="Accessibility", content=content)]
+            api_items = []
+            accessibility_notes = ["Use an accessible name", "Keep keyboard focus visible"]
+        else:
+            sections = [DocumentSection(kind="usage", title="Usage", content=content)]
+            api_items = []
+            accessibility_notes = []
         return ComponentDocument(
             library=fetched.descriptor.library,
             component=fetched.descriptor.component,
@@ -71,6 +95,9 @@ class FakeAdapter:
             title=fetched.descriptor.title,
             content_md=content,
             code_examples=[f"{fetched.descriptor.doc_type}_button()"],
+            sections=sections,
+            api_items=api_items,
+            accessibility_notes=accessibility_notes,
             source_url=fetched.descriptor.url,
             source_kind=fetched.descriptor.source_kind,
             version="1.0.0",
@@ -224,6 +251,243 @@ async def test_search_prefers_api_doc_type_for_api_queries(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_audit_sources_generates_report_and_snapshots(tmp_path):
+    service = build_service(
+        tmp_path,
+        adapter=FakeAdapter(
+            "mui",
+            "Overview content for buttons with more than enough detail to avoid a short-content warning.",
+            docs={
+                "overview": "Overview content for buttons with more than enough detail to avoid a short-content warning.",
+                "api": "variant prop disabled prop onClick callback API reference with enough extra descriptive text to exceed the short-content threshold.",
+            },
+        ),
+    )
+    await service.startup()
+    try:
+        report = await service.audit_sources(library="mui", snapshot_dir=str(tmp_path / "snapshots"))
+        assert len(report.entries) == 2
+        assert all(entry.fetch_status == "success" for entry in report.entries)
+        assert all(entry.snapshot_path for entry in report.entries)
+    finally:
+        await service.shutdown()
+
+
+@pytest.mark.anyio
+async def test_audit_baseline_compare_detects_changed_entries(tmp_path):
+    baseline_path = tmp_path / "audit-baseline.json"
+
+    baseline_service = build_service(
+        tmp_path,
+        adapter=FakeAdapter(
+            "mui",
+            "Overview content for buttons with sufficient detail.",
+            docs={
+                "overview": "Overview content for buttons with sufficient detail.",
+                "api": "variant prop disabled prop onClick callback API reference",
+            },
+        ),
+    )
+    await baseline_service.startup()
+    try:
+        baseline_report = await baseline_service.audit_sources(library="mui")
+        baseline_service.save_audit_baseline(baseline_report, baseline_path=str(baseline_path))
+    finally:
+        await baseline_service.shutdown()
+
+    drift_service = build_service(
+        tmp_path,
+        adapter=FakeAdapter(
+            "mui",
+            "Overview content changed substantially for buttons with extra detail.",
+            docs={
+                "overview": "Overview content changed substantially for buttons with extra detail.",
+                "api": "variant prop disabled prop onClick callback API reference with changed details",
+            },
+        ),
+    )
+    await drift_service.startup()
+    try:
+        current_report, comparison, resolved_path = await drift_service.compare_audit_to_baseline(
+            library="mui",
+            baseline_path=str(baseline_path),
+        )
+        assert current_report.entries
+        assert comparison is not None
+        assert resolved_path == str(baseline_path)
+        assert comparison.changed_count >= 1
+        assert any(entry.status == "changed" for entry in comparison.entries)
+    finally:
+        await drift_service.shutdown()
+
+
+@pytest.mark.anyio
+async def test_maintenance_report_classifies_regression_and_renders_markdown(tmp_path):
+    baseline_path = tmp_path / "maintenance-baseline.json"
+
+    baseline_service = build_service(
+        tmp_path,
+        adapter=FakeAdapter(
+            "mui",
+            long_text("Overview content for buttons with sufficient detail."),
+            docs={"overview": long_text("Overview content for buttons with sufficient detail.")},
+        ),
+    )
+    await baseline_service.startup()
+    try:
+        baseline_report = await baseline_service.audit_sources(library="mui")
+        baseline_service.save_audit_baseline(baseline_report, baseline_path=str(baseline_path))
+    finally:
+        await baseline_service.shutdown()
+
+    drift_service = build_service(
+        tmp_path,
+        adapter=FakeAdapter("mui", "unused", should_fail=True),
+    )
+    await drift_service.startup()
+    try:
+        report, comparison, maintenance_report, resolved_path = await drift_service.build_audit_maintenance_report(
+            library="mui",
+            baseline_path=str(baseline_path),
+        )
+        markdown = drift_service.render_audit_maintenance_report_markdown(maintenance_report)
+
+        assert report.entries
+        assert comparison is not None
+        assert resolved_path == str(baseline_path)
+        assert maintenance_report.error_count >= 1
+        assert any(item.category == "fetch_failure" for item in maintenance_report.recommendations)
+        assert any(item.drift_status == "regressed" for item in maintenance_report.recommendations)
+        assert has_recommendations_at_or_above(maintenance_report.recommendations, AuditSeverity.error) is True
+        assert "# Catalog Maintenance Report" in markdown
+        assert "Catalog fetch regressed" in markdown
+    finally:
+        await drift_service.shutdown()
+
+
+@pytest.mark.anyio
+async def test_promote_baseline_blocks_on_error_recommendations(tmp_path):
+    baseline_path = tmp_path / "promote-baseline.json"
+    report_dir = tmp_path / "reports"
+
+    baseline_service = build_service(
+        tmp_path,
+        adapter=FakeAdapter(
+            "mui",
+            long_text("Overview content for buttons with sufficient detail."),
+            docs={"overview": long_text("Overview content for buttons with sufficient detail.")},
+        ),
+    )
+    await baseline_service.startup()
+    try:
+        baseline_report = await baseline_service.audit_sources(library="mui")
+        baseline_service.save_audit_baseline(baseline_report, baseline_path=str(baseline_path))
+        original_baseline = baseline_path.read_text(encoding="utf-8")
+    finally:
+        await baseline_service.shutdown()
+
+    blocked_service = build_service(tmp_path, adapter=FakeAdapter("mui", "unused", should_fail=True))
+    await blocked_service.startup()
+    try:
+        report, comparison, promotion = await blocked_service.promote_audit_baseline(
+            library="mui",
+            baseline_path=str(baseline_path),
+            report_dir=str(report_dir),
+            max_allowed_severity=AuditSeverity.warn,
+        )
+        assert report.entries
+        assert comparison is not None
+        assert promotion.promoted is False
+        assert promotion.blocking_recommendation_count >= 1
+        assert promotion.report_json_path is not None
+        assert promotion.report_markdown_path is not None
+        assert baseline_path.read_text(encoding="utf-8") == original_baseline
+    finally:
+        await blocked_service.shutdown()
+
+
+@pytest.mark.anyio
+async def test_promote_baseline_succeeds_for_info_only_drift(tmp_path):
+    baseline_path = tmp_path / "promote-success-baseline.json"
+    report_dir = tmp_path / "promotion-reports"
+
+    baseline_service = build_service(
+        tmp_path,
+        adapter=FakeAdapter(
+            "mui",
+            long_text("Overview content for buttons with sufficient detail."),
+            docs={"overview": long_text("Overview content for buttons with sufficient detail.")},
+        ),
+    )
+    await baseline_service.startup()
+    try:
+        baseline_report = await baseline_service.audit_sources(library="mui")
+        baseline_service.save_audit_baseline(baseline_report, baseline_path=str(baseline_path))
+    finally:
+        await baseline_service.shutdown()
+
+    promoting_service = build_service(
+        tmp_path,
+        adapter=FakeAdapter(
+            "mui",
+            long_text("Overview content changed but still fully structured and healthy."),
+            docs={"overview": long_text("Overview content changed but still fully structured and healthy.")},
+        ),
+    )
+    await promoting_service.startup()
+    try:
+        report, comparison, promotion = await promoting_service.promote_audit_baseline(
+            library="mui",
+            baseline_path=str(baseline_path),
+            report_dir=str(report_dir),
+            max_allowed_severity=AuditSeverity.warn,
+        )
+        assert report.entries
+        assert comparison is not None
+        assert promotion.promoted is True
+        assert promotion.blocking_recommendation_count == 0
+        assert promotion.report_json_path is not None
+        assert promotion.report_markdown_path is not None
+        updated_baseline = promoting_service.load_audit_baseline(baseline_path=str(baseline_path))
+        assert updated_baseline is not None
+        assert updated_baseline.entries[0].content_checksum == report.entries[0].content_checksum
+    finally:
+        await promoting_service.shutdown()
+
+
+@pytest.mark.anyio
+async def test_resolve_component_query_returns_summary_and_supporting_docs(tmp_path):
+    service = build_service(
+        tmp_path,
+        adapter=FakeAdapter(
+            "mui",
+            "Usage guidance for buttons in forms and dialogs.",
+            docs={
+                "overview": "Use buttons for primary actions in forms and dialogs.",
+                "api": "variant prop disabled prop onClick callback API reference",
+                "accessibility": "Use an accessible name for icon buttons and preserve focus visibility.",
+            },
+        ),
+    )
+    await service.startup()
+    try:
+        await service.refresh(RefreshRequest(library="mui", component="button"))
+        response = await service.resolve_component_query(
+            "Which button props should I use and what accessibility guidance matters?",
+            library="mui",
+            component_hint="button",
+        )
+        assert response.library == "mui"
+        assert response.component == "button"
+        assert response.summary
+        assert response.api_highlights
+        assert response.accessibility_highlights
+        assert len(response.supporting_documents) >= 2
+    finally:
+        await service.shutdown()
+
+
+@pytest.mark.anyio
 async def test_miss_returns_clear_message_when_refresh_fails(tmp_path):
     service = build_service(tmp_path, adapter=FakeAdapter("mui", "unused", should_fail=True))
     await service.startup()
@@ -267,43 +531,96 @@ async def test_search_uses_vector_fallback_when_fts_is_empty(tmp_path, monkeypat
 
 
 def test_admin_api_endpoints(tmp_path):
+    baseline_path = tmp_path / "api-audit-baseline.json"
+    report_dir = tmp_path / "api-reports"
     service = build_service(
         tmp_path,
-        adapter=FakeAdapter("mui", "Primary action button", docs={"overview": "Overview content", "api": "API content"}),
+        adapter=FakeAdapter(
+            "mui",
+            long_text("Primary action button"),
+            docs={
+                "overview": long_text("Overview content"),
+                "api": long_text("API content"),
+            },
+        ),
     )
     app = create_app(service=service)
 
     with TestClient(app) as client:
+        write_baseline = client.post(
+            "/catalog/audit/baseline",
+            params={"library": "mui", "baseline_path": str(baseline_path)},
+        )
         health = client.get("/health")
         refresh = client.post("/refresh", json={"library": "mui", "component": "button"})
         document = client.get("/documents/mui/button")
         sources = client.get("/sources")
         search = client.get("/search", params={"query": "overview content", "library": "mui"})
+        resolve = client.get(
+            "/resolve",
+            params={
+                "query": "button props variant",
+                "library": "mui",
+                "component_hint": "button",
+            },
+        )
         bundle = client.get("/bundles/mui/button")
         status = client.get("/status/mui/button")
         refresh_status = client.get("/refresh/status")
+        catalog_audit = client.get("/catalog/audit", params={"library": "mui", "limit": 1})
+        catalog_diff = client.get(
+            "/catalog/audit/diff",
+            params={"library": "mui", "baseline_path": str(baseline_path)},
+        )
+        catalog_report = client.get(
+            "/catalog/audit/report",
+            params={"library": "mui", "baseline_path": str(baseline_path)},
+        )
+        catalog_promote = client.post(
+            "/catalog/audit/promote",
+            params={"library": "mui", "baseline_path": str(baseline_path), "report_dir": str(report_dir)},
+        )
 
+    assert write_baseline.status_code == 200
     assert health.status_code == 200
     assert refresh.status_code == 200
     assert document.status_code == 200
     assert sources.status_code == 200
     assert search.status_code == 200
+    assert resolve.status_code == 200
     assert bundle.status_code == 200
     assert status.status_code == 200
     assert refresh_status.status_code == 200
+    assert catalog_audit.status_code == 200
+    assert catalog_diff.status_code == 200
+    assert catalog_report.status_code == 200
+    assert catalog_promote.status_code == 200
     assert document.json()["document"]["component"] == "button"
     assert len(refresh.json()["refreshed_documents"]) == 2
     assert search.json()["results"]
+    assert resolve.json()["summary"]
     assert len(bundle.json()["documents"]) == 2
     assert status.json()["last_refresh_status"] in {"success", "not_modified"}
     assert refresh_status.json()["total_attempts"] >= 2
+    assert len(catalog_audit.json()["entries"]) == 1
+    assert catalog_diff.json()["comparison"]["unchanged_count"] >= 1
+    assert "maintenance_report" in catalog_report.json()
+    assert "markdown" in catalog_report.json()
+    assert catalog_promote.json()["promotion"]["promoted"] is True
 
 
 @pytest.mark.anyio
 async def test_mcp_tool_roundtrip(tmp_path):
     service = build_service(
         tmp_path,
-        adapter=FakeAdapter("mui", "Primary action button", docs={"overview": "Overview content", "api": "API content"}),
+        adapter=FakeAdapter(
+            "mui",
+            long_text("Primary action button"),
+            docs={
+                "overview": long_text("Overview content"),
+                "api": long_text("API content"),
+            },
+        ),
     )
     await service.startup()
     try:
@@ -311,15 +628,51 @@ async def test_mcp_tool_roundtrip(tmp_path):
 
         mcp_server = build_mcp_server(service)
         tools = await mcp_server.list_tools()
+        audit_report = await service.audit_sources(library="mui")
+        baseline_path = tmp_path / "mcp-audit-baseline.json"
+        service.save_audit_baseline(audit_report, baseline_path=str(baseline_path))
         result = await mcp_server.call_tool("get_component_doc", {"library": "mui", "component": "button"})
         structured = result[1]
         bundle_result = await mcp_server.call_tool("get_component_bundle", {"library": "mui", "component": "button"})
         structured_bundle = bundle_result[1]
+        resolved_result = await mcp_server.call_tool(
+            "resolve_component_query",
+            {"query": "button props variant", "library": "mui", "component_hint": "button"},
+        )
+        structured_resolved = resolved_result[1]
+        audit_result = await mcp_server.call_tool("audit_catalog", {"library": "mui", "limit": 1})
+        structured_audit = audit_result[1]
+        compare_result = await mcp_server.call_tool(
+            "compare_catalog_to_baseline",
+            {"library": "mui", "baseline_path": str(baseline_path)},
+        )
+        structured_compare = compare_result[1]
+        maintenance_result = await mcp_server.call_tool(
+            "get_catalog_maintenance_report",
+            {"library": "mui", "baseline_path": str(baseline_path)},
+        )
+        structured_maintenance = maintenance_result[1]
+        promote_result = await mcp_server.call_tool(
+            "promote_catalog_baseline",
+            {"library": "mui", "baseline_path": str(baseline_path), "report_dir": str(tmp_path / "mcp-reports")},
+        )
+        structured_promote = promote_result[1]
 
         assert any(tool.name == "get_component_doc" for tool in tools)
         assert any(tool.name == "get_component_bundle" for tool in tools)
+        assert any(tool.name == "resolve_component_query" for tool in tools)
+        assert any(tool.name == "audit_catalog" for tool in tools)
+        assert any(tool.name == "compare_catalog_to_baseline" for tool in tools)
+        assert any(tool.name == "get_catalog_maintenance_report" for tool in tools)
+        assert any(tool.name == "promote_catalog_baseline" for tool in tools)
         assert structured["document"]["component"] == "button"
         assert len(structured_bundle["documents"]) == 2
+        assert structured_resolved["summary"]
+        assert structured_audit["entries"]
+        assert structured_compare["comparison"]["unchanged_count"] >= 1
+        assert structured_maintenance["maintenance_report"]["comparison_available"] is True
+        assert structured_maintenance["markdown"]
+        assert structured_promote["promotion"]["promoted"] is True
     finally:
         await service.shutdown()
 

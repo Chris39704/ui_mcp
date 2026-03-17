@@ -51,17 +51,75 @@ Example MCP client config:
 uv run ui-knowledge-service prewarm
 ```
 
+## Audit the source catalog
+
+Fetch, normalize, and validate the configured official sources:
+
+```bash
+uv run ui-knowledge-service audit-catalog --library mui --snapshot-dir ./tmp/catalog-audit
+```
+
+Compare against the stored baseline and fail if drift is detected:
+
+```bash
+uv run ui-knowledge-service audit-catalog --library mui --compare-to-baseline --fail-on-drift
+```
+
+Generate a severity-ranked maintenance report and write a Markdown summary:
+
+```bash
+uv run ui-knowledge-service audit-catalog --library mui --compare-to-baseline --markdown-report ./tmp/catalog-maintenance.md
+```
+
+Fail CI only when the maintenance report contains warnings or errors:
+
+```bash
+uv run ui-knowledge-service audit-catalog --library mui --compare-to-baseline --fail-on-severity warn
+```
+
+Safely promote the current audit to the baseline after persisting JSON and Markdown report artifacts:
+
+```bash
+uv run ui-knowledge-service promote-baseline --library mui --max-allowed-severity warn
+```
+
+Force a promotion when you already reviewed the blocking recommendations:
+
+```bash
+uv run ui-knowledge-service promote-baseline --library mui --force
+```
+
+Write the current audit as the new baseline:
+
+```bash
+uv run ui-knowledge-service audit-catalog --library mui --write-baseline
+```
+
 The service stores its working data under `.data/ui_knowledge_service` by default.
+
+## Resolve a query into guidance
+
+Use the high-level resolver when a client wants an actionable answer instead of raw documents:
+
+```bash
+curl "http://127.0.0.1:8000/resolve?query=button%20props%20variant&library=mui&component_hint=button"
+```
 
 ## HTTP endpoints
 
 - `GET /health`
 - `GET /sources`
+- `GET /catalog/audit`
+- `GET /catalog/audit/diff`
+- `GET /catalog/audit/report`
+- `POST /catalog/audit/promote`
 - `GET /search?query=button&library=mui`
+- `GET /resolve?query=button%20props%20variant&library=mui&component_hint=button`
 - `GET /documents/{library}/{component}`
 - `GET /bundles/{library}/{component}`
 - `GET /status/{library}/{component}`
 - `GET /refresh/status`
+- `POST /catalog/audit/baseline`
 - `POST /refresh`
 
 ## MCP tools
@@ -69,6 +127,11 @@ The service stores its working data under `.data/ui_knowledge_service` by defaul
 - `get_component_doc`
 - `get_component_bundle`
 - `search_component_docs`
+- `resolve_component_query`
+- `audit_catalog`
+- `compare_catalog_to_baseline`
+- `get_catalog_maintenance_report`
+- `promote_catalog_baseline`
 - `get_component_examples`
 - `get_component_status`
 

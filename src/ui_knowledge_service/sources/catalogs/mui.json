@@ -82,5 +82,65 @@
     "freshness_days": 7,
     "content_selector": "main",
     "heading_selector": "h1"
+  },
+  {
+    "component": "select",
+    "doc_type": "overview",
+    "title": "MUI Select Overview",
+    "url": "https://mui.com/material-ui/react-select/",
+    "source_kind": "docs_page",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "select",
+    "doc_type": "api",
+    "title": "MUI Select API",
+    "url": "https://mui.com/material-ui/api/select/",
+    "source_kind": "api_reference",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "tabs",
+    "doc_type": "overview",
+    "title": "MUI Tabs Overview",
+    "url": "https://mui.com/material-ui/react-tabs/",
+    "source_kind": "docs_page",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "tabs",
+    "doc_type": "api",
+    "title": "MUI Tabs API",
+    "url": "https://mui.com/material-ui/api/tabs/",
+    "source_kind": "api_reference",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "card",
+    "doc_type": "overview",
+    "title": "MUI Card Overview",
+    "url": "https://mui.com/material-ui/react-card/",
+    "source_kind": "docs_page",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "card",
+    "doc_type": "api",
+    "title": "MUI Card API",
+    "url": "https://mui.com/material-ui/api/card/",
+    "source_kind": "api_reference",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
   }
 ]

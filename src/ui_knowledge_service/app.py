@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 
 from ui_knowledge_service.config import Settings
 from ui_knowledge_service.mcp_server import build_mcp_server
-from ui_knowledge_service.models import RefreshRequest
+from ui_knowledge_service.models import AuditSeverity, FreshnessState, RefreshRequest
 from ui_knowledge_service.service import KnowledgeService
 
 
@@ -39,6 +39,104 @@ def create_app(
     async def sources() -> list[dict[str, object]]:
         return [summary.model_dump(mode="json") for summary in active_service.source_summaries()]
 
+    @app.get("/catalog/audit")
+    async def catalog_audit(
+        library: str | None = None,
+        component: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, object]:
+        report = await active_service.audit_sources(
+            library=library,
+            component=component,
+            limit=limit,
+        )
+        return report.model_dump(mode="json")
+
+    @app.get("/catalog/audit/diff")
+    async def catalog_audit_diff(
+        library: str | None = None,
+        component: str | None = None,
+        limit: int | None = None,
+        baseline_path: str | None = None,
+    ) -> dict[str, object]:
+        report, comparison, resolved_baseline_path = await active_service.compare_audit_to_baseline(
+            library=library,
+            component=component,
+            limit=limit,
+            baseline_path=baseline_path,
+        )
+        return {
+            "report": report.model_dump(mode="json"),
+            "comparison": comparison.model_dump(mode="json") if comparison else None,
+            "baseline_path": resolved_baseline_path,
+        }
+
+    @app.get("/catalog/audit/report")
+    async def catalog_audit_report(
+        library: str | None = None,
+        component: str | None = None,
+        limit: int | None = None,
+        baseline_path: str | None = None,
+    ) -> dict[str, object]:
+        report, comparison, maintenance_report, resolved_baseline_path = await active_service.build_audit_maintenance_report(
+            library=library,
+            component=component,
+            limit=limit,
+            baseline_path=baseline_path,
+        )
+        return {
+            "report": report.model_dump(mode="json"),
+            "comparison": comparison.model_dump(mode="json") if comparison else None,
+            "maintenance_report": maintenance_report.model_dump(mode="json"),
+            "markdown": active_service.render_audit_maintenance_report_markdown(maintenance_report),
+            "baseline_path": resolved_baseline_path,
+        }
+
+    @app.post("/catalog/audit/baseline")
+    async def catalog_audit_write_baseline(
+        library: str | None = None,
+        component: str | None = None,
+        limit: int | None = None,
+        baseline_path: str | None = None,
+    ) -> dict[str, object]:
+        report = await active_service.audit_sources(
+            library=library,
+            component=component,
+            limit=limit,
+        )
+        saved_path = active_service.save_audit_baseline(report, baseline_path=baseline_path)
+        return {
+            "baseline_path": saved_path,
+            "report": report.model_dump(mode="json"),
+        }
+
+    @app.post("/catalog/audit/promote")
+    async def catalog_audit_promote(
+        library: str | None = None,
+        component: str | None = None,
+        limit: int | None = None,
+        baseline_path: str | None = None,
+        snapshot_dir: str | None = None,
+        report_dir: str | None = None,
+        max_allowed_severity: AuditSeverity = AuditSeverity.warn,
+        force: bool = False,
+    ) -> dict[str, object]:
+        report, comparison, promotion = await active_service.promote_audit_baseline(
+            library=library,
+            component=component,
+            limit=limit,
+            baseline_path=baseline_path,
+            snapshot_dir=snapshot_dir,
+            report_dir=report_dir,
+            max_allowed_severity=max_allowed_severity,
+            force=force,
+        )
+        return {
+            "report": report.model_dump(mode="json"),
+            "comparison": comparison.model_dump(mode="json") if comparison else None,
+            "promotion": promotion.model_dump(mode="json"),
+        }
+
     @app.get("/search")
     async def search(
         query: str,
@@ -52,6 +150,23 @@ def create_app(
             component_hint=component_hint,
             k=k,
         )
+        return response.model_dump(mode="json")
+
+    @app.get("/resolve")
+    async def resolve(
+        query: str,
+        library: str | None = None,
+        component_hint: str | None = None,
+        freshness: str = "prefer_cache",
+    ) -> dict[str, object]:
+        response = await active_service.resolve_component_query(
+            query=query,
+            library=library,
+            component_hint=component_hint,
+            freshness=freshness,
+        )
+        if response.freshness_state == FreshnessState.missing and not response.supporting_documents:
+            raise HTTPException(status_code=404, detail=response.model_dump(mode="json"))
         return response.model_dump(mode="json")
 
     @app.get("/documents/{library}/{component}")

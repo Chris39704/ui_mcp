@@ -80,5 +80,65 @@
     "freshness_days": 7,
     "content_selector": "main",
     "heading_selector": "h1"
+  },
+  {
+    "component": "select",
+    "doc_type": "overview",
+    "title": "Angular Material Select Overview",
+    "url": "https://material.angular.dev/components/select/overview",
+    "source_kind": "docs_page",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "select",
+    "doc_type": "api",
+    "title": "Angular Material Select API",
+    "url": "https://material.angular.dev/components/select/api",
+    "source_kind": "api_reference",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "tabs",
+    "doc_type": "overview",
+    "title": "Angular Material Tabs Overview",
+    "url": "https://material.angular.dev/components/tabs/overview",
+    "source_kind": "docs_page",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "tabs",
+    "doc_type": "api",
+    "title": "Angular Material Tabs API",
+    "url": "https://material.angular.dev/components/tabs/api",
+    "source_kind": "api_reference",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "card",
+    "doc_type": "overview",
+    "title": "Angular Material Card Overview",
+    "url": "https://material.angular.dev/components/card/overview",
+    "source_kind": "docs_page",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "card",
+    "doc_type": "api",
+    "title": "Angular Material Card API",
+    "url": "https://material.angular.dev/components/card/api",
+    "source_kind": "api_reference",
+    "freshness_days": 7,
+    "content_selector": "main",
+    "heading_selector": "h1"
   }
 ]

@@ -35,6 +35,10 @@ class Settings:
         return self.data_dir / "index"
 
     @property
+    def audit_dir(self) -> Path:
+        return self.data_dir / "audit"
+
+    @property
     def database_path(self) -> Path:
         return self.data_dir / self.database_filename
 
@@ -46,4 +50,4 @@ class Settings:
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.normalized_dir.mkdir(parents=True, exist_ok=True)
         self.index_dir.mkdir(parents=True, exist_ok=True)
-
+        self.audit_dir.mkdir(parents=True, exist_ok=True)

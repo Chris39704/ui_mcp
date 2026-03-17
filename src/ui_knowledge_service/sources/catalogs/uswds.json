@@ -80,5 +80,65 @@
     "freshness_days": 14,
     "content_selector": "main",
     "heading_selector": "h1"
+  },
+  {
+    "component": "card",
+    "doc_type": "overview",
+    "title": "USWDS Card Overview",
+    "url": "https://designsystem.digital.gov/components/card/",
+    "source_kind": "docs_page",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "card",
+    "doc_type": "accessibility",
+    "title": "USWDS Card Accessibility",
+    "url": "https://designsystem.digital.gov/components/card/",
+    "source_kind": "accessibility_reference",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "search",
+    "doc_type": "overview",
+    "title": "USWDS Search Overview",
+    "url": "https://designsystem.digital.gov/components/search/",
+    "source_kind": "docs_page",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "search",
+    "doc_type": "accessibility",
+    "title": "USWDS Search Accessibility",
+    "url": "https://designsystem.digital.gov/components/search/",
+    "source_kind": "accessibility_reference",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "footer",
+    "doc_type": "overview",
+    "title": "USWDS Footer Overview",
+    "url": "https://designsystem.digital.gov/components/footer/",
+    "source_kind": "docs_page",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
+  },
+  {
+    "component": "footer",
+    "doc_type": "accessibility",
+    "title": "USWDS Footer Accessibility",
+    "url": "https://designsystem.digital.gov/components/footer/",
+    "source_kind": "accessibility_reference",
+    "freshness_days": 14,
+    "content_selector": "main",
+    "heading_selector": "h1"
   }
 ]
